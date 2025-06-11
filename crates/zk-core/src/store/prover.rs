@@ -170,12 +170,16 @@ impl ProverStore {
     }
 
     fn flush_decode(&mut self) -> Result<()> {
-        for mut op in self
-            .buffer_decode
-            .extract_if(.., |op| self.data_store.is_set(op.slice))
-        {
-            let data = self.data_store.try_get(op.slice)?;
-            op.send(data.to_bitvec())?;
+        let mut i = 0;
+
+        while i < self.buffer_decode.len() {
+            if self.data_store.is_set(self.buffer_decode[i].slice) {
+                let mut op = self.buffer_decode.remove(i);
+                let data = self.data_store.try_get(op.slice)?;
+                op.send(data.to_bitvec())?;
+            } else {
+                i += 1;
+            }
         }
 
         Ok(())

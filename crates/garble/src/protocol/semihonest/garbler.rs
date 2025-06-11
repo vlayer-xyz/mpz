@@ -32,35 +32,64 @@ impl<COT> Garbler<COT> {
 
     fn take_preprocess_calls(&mut self) -> Vec<(Call, Slice)> {
         let store = self.store.try_lock().unwrap();
-        self.call_stack
-            .extract_if(.., |(call, _)| {
+        let mut result = Vec::new();
+        let mut i = 0;
+
+        while i < self.call_stack.len() {
+            if {
+                let (call, _) = &mut self.call_stack[i];
                 call.inputs().iter().all(|slice| store.is_set_keys(*slice))
-            })
-            .collect()
+            } {
+                let val = self.call_stack.remove(i);
+                result.push(val);
+            } else {
+                i += 1;
+            }
+        }
+
+        result
     }
 
     fn take_execute_calls(&mut self) -> Vec<(Call, Slice)> {
         let store = self.store.try_lock().unwrap();
-        self.call_stack
-            .extract_if(.., |(call, _)| {
+        let mut result = Vec::new();
+        let mut i = 0;
+
+        while i < self.call_stack.len() {
+            if {
+                let (call, _) = &mut self.call_stack[i];
                 call.inputs()
                     .iter()
                     .all(|slice| store.is_committed_raw(*slice))
-            })
-            .collect()
+            } {
+                let val = self.call_stack.remove(i);
+                result.push(val);
+            } else {
+                i += 1;
+            }
+        }
+
+        result
     }
 
     // Marks the outputs of preprocessed calls as executed.
     fn mark_executed(&mut self) -> Result<()> {
         let mut store = self.store.try_lock().unwrap();
         loop {
-            let outputs = self
-                .preprocessed
-                .extract_if(.., |(inputs, _)| {
+            let mut outputs = Vec::new();
+            let mut i = 0;
+
+            while i < self.preprocessed.len() {
+                if {
+                    let (inputs, _) = &mut self.preprocessed[i];
                     inputs.iter().all(|input| store.is_committed_raw(*input))
-                })
-                .map(|(_, output)| output)
-                .collect::<Vec<_>>();
+                } {
+                    let (_, output) = self.preprocessed.remove(i);
+                    outputs.push(output);
+                } else {
+                    i += 1;
+                }
+            }
 
             if outputs.is_empty() {
                 break;

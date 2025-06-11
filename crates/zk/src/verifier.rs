@@ -104,14 +104,17 @@ where
     async fn execute(&mut self, ctx: &mut Context) -> VmResult<()> {
         let mut verifier = Core::new(*self.store.delta());
         while !self.callstack.is_empty() {
-            let ready_calls: Vec<_> = self
-                .callstack
-                .extract_if(.., |(call, _)| {
+            let mut ready_calls = Vec::new();
+            let mut i = 0;
+
+            while i < self.callstack.len() {
+                if {
+                    let (call, _) = &mut self.callstack[i];
                     call.inputs()
                         .iter()
                         .all(|input| self.store.is_committed_raw(*input))
-                })
-                .map(|(call, output)| {
+                } {
+                    let (call, output) = self.callstack.remove(i);
                     let input_keys = call
                         .inputs()
                         .iter()
@@ -121,9 +124,11 @@ where
                         .copied()
                         .collect::<Vec<_>>();
                     let (circ, _) = call.into_parts();
-                    (circ, input_keys, output)
-                })
-                .collect();
+                    ready_calls.push((circ, input_keys, output));
+                } else {
+                    i += 1;
+                }
+            }
 
             if ready_calls.is_empty() {
                 break;

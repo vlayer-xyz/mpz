@@ -34,9 +34,12 @@ impl<COT> Evaluator<COT> {
 
     fn take_preprocess_calls(&mut self) -> Vec<(Call, Slice)> {
         let mut idx_outputs = RangeSet::default();
-        self.call_stack
-            // Extract calls which have no dependencies on other prior calls.
-            .extract_if(.., |(call, output)| {
+        let mut result = Vec::new();
+        let mut i = 0;
+
+        while i < self.call_stack.len() {
+            if {
+                let (call, output) = &mut self.call_stack[i];
                 if call
                     .inputs()
                     .iter()
@@ -48,33 +51,58 @@ impl<COT> Evaluator<COT> {
                     idx_outputs |= output.to_range();
                     false
                 }
-            })
-            .collect()
+            } {
+                let val = self.call_stack.remove(i);
+                result.push(val);
+            } else {
+                i += 1;
+            }
+        }
+
+        result
     }
 
     fn take_execute_calls(&mut self) -> Vec<(Call, Slice)> {
         let store = self.store.try_lock().unwrap();
-        self.call_stack
-            // Extract only a call which has all its inputs committed.
-            .extract_if(.., |(call, _)| {
+        let mut result = Vec::new();
+        let mut i = 0;
+
+        while i < self.call_stack.len() {
+            if {
+                let (call, _) = &mut self.call_stack[i];
                 call.inputs()
                     .iter()
                     .all(|input| store.is_committed_raw(*input))
-            })
-            .collect()
+            } {
+                let val = self.call_stack.remove(i);
+                result.push(val);
+            } else {
+                i += 1;
+            }
+        }
+
+        result
     }
 
     fn execute_preprocessed(&mut self) -> Result<()> {
         let mut store = self.store.try_lock().unwrap();
         loop {
-            let (calls, outputs): (Vec<_>, Vec<_>) = self
-                .preprocessed
-                .extract_if(|_, (call, _)| {
-                    call.inputs()
-                        .iter()
-                        .all(|input| store.is_committed_raw(*input))
-                })
-                .map(|(output, (call, garbled_circuit))| {
+            let mut calls = Vec::new();
+            let mut outputs = Vec::new();
+
+            let mut to_remove = Vec::new();
+            for (output, (call, _garbled_circuit)) in &self.preprocessed {
+                if call
+                    .inputs()
+                    .iter()
+                    .all(|input| store.is_committed_raw(*input))
+                {
+                    to_remove.push(*output);
+                }
+            }
+
+            for output in to_remove {
+                if let Some((call, garbled_circuit)) = self.preprocessed.remove(&output) {
                     let (circ, inputs) = call.into_parts();
                     let mut input_macs = Vec::with_capacity(circ.inputs().len());
                     for input in inputs {
@@ -85,9 +113,10 @@ impl<COT> Evaluator<COT> {
                         );
                     }
 
-                    ((circ, input_macs, garbled_circuit), output)
-                })
-                .unzip();
+                    calls.push((circ, input_macs, garbled_circuit));
+                    outputs.push(output);
+                }
+            }
 
             if calls.is_empty() {
                 break;
